@@ -32,6 +32,9 @@ def html_to_pdf(html: str, out_path: str | Path) -> Path:
     try:
         subprocess.run(
             [_find_chrome(), "--headless", "--disable-gpu", "--no-pdf-header-footer",
+             # --no-sandbox / --disable-dev-shm-usage: required to run Chromium headless
+             # as root inside a container; harmless on a normal desktop.
+             "--no-sandbox", "--disable-dev-shm-usage",
              "--virtual-time-budget=6000", f"--print-to-pdf={out_path}", tmp.as_uri()],
             check=True, capture_output=True, timeout=60,
         )
