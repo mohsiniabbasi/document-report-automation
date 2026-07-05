@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+app/sample_monthly_performance.csv
+*.pdf
+.DS_Store
