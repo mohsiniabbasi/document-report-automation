@@ -84,6 +84,34 @@ def narrative(m: dict, use_llm: bool = False) -> str:
     return _rule_narrative(m)
 
 
+def chart_png_data_uri(m: dict) -> str:
+    """Render the revenue-vs-costs chart to a base64 PNG (server-side, no browser)."""
+    import base64
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    labels, rev, cost = m["labels"], m["revenue"], m["costs"]
+    x = range(len(labels))
+    w = 0.4
+    fig, ax = plt.subplots(figsize=(7.2, 2.7), dpi=140)
+    ax.bar([i - w / 2 for i in x], rev, width=w, label="Revenue", color="#6d28d9")
+    ax.bar([i + w / 2 for i in x], cost, width=w, label="Costs", color="#c4b5fd")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(labels, fontsize=8)
+    ax.tick_params(axis="y", labelsize=8)
+    ax.legend(loc="upper left", fontsize=8, frameon=False)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    ax.grid(axis="y", color="#e2e8f0", linewidth=0.6)
+    ax.set_axisbelow(True)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    plt.close(fig)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
 def build_html(m: dict, summary: str, company: str) -> str:
     def money(x): return f"£{x:,.0f}"
     rows = "".join(
@@ -91,32 +119,35 @@ def build_html(m: dict, summary: str, company: str) -> str:
         f"<td class='{'pos' if p>=0 else 'neg'}'>{money(p)}</td></tr>"
         for lbl, r, c, p in zip(m["labels"], m["revenue"], m["costs"], m["profit"])
     )
+    chart = chart_png_data_uri(m)
+    growth = f"{'+' if m['growth_pct']>=0 else ''}{m['growth_pct']}%"
+    # WeasyPrint-friendly CSS: no flex/grid — KPI cards use inline-block.
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   @page {{ size:A4; margin:16mm 15mm; }}
-  * {{ box-sizing:border-box; }}
-  body {{ font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif; color:#1f2937; font-size:10.5pt; margin:0; }}
-  .cover {{ background:#1e1b4b; color:#fff; padding:26px 28px; border-radius:12px; }}
+  body {{ font-family:"Helvetica Neue",Helvetica,Arial,sans-serif; color:#1f2937; font-size:10.5pt; margin:0; }}
+  .cover {{ background:#1e1b4b; color:#fff; padding:24px 26px; border-radius:12px; }}
   .cover .k {{ font-size:8.5pt; letter-spacing:2px; text-transform:uppercase; color:#c4b5fd; margin:0 0 6px; }}
   .cover h1 {{ font-size:22pt; margin:0 0 4px; }}
   .cover p {{ margin:0; color:#ddd6fe; }}
   h2 {{ font-size:12.5pt; color:#1e1b4b; border-bottom:2px solid #c4b5fd; padding-bottom:3px; margin:20px 0 8px; }}
   .summary {{ background:#f5f3ff; border:1px solid #e9e5ff; border-radius:8px; padding:12px 15px; font-size:11pt; }}
-  .kpis {{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:10px 0; }}
-  .kpi {{ background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:11px; text-align:center; }}
-  .kpi .n {{ font-size:16pt; font-weight:700; color:#6d28d9; }} .kpi .l {{ font-size:8pt; color:#64748b; text-transform:uppercase; }}
+  .kpis {{ margin:12px 0; }}
+  .kpi {{ display:inline-block; width:23%; margin-right:1.5%; vertical-align:top;
+          background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:11px 6px; text-align:center; }}
+  .kpi .n {{ font-size:15pt; font-weight:700; color:#6d28d9; }}
+  .kpi .l {{ font-size:8pt; color:#64748b; text-transform:uppercase; }}
+  .chart {{ width:100%; margin-top:6px; }}
   table {{ width:100%; border-collapse:collapse; margin-top:8px; }}
   th,td {{ border:1px solid #e2e8f0; padding:6px 10px; font-size:9.5pt; text-align:right; }}
   th {{ background:#f1f5f9; color:#1e1b4b; }} td:first-child, th:first-child {{ text-align:left; }}
   .pos {{ color:#059669; }} .neg {{ color:#dc2626; }}
   .foot {{ margin-top:18px; padding-top:8px; border-top:1px solid #e2e8f0; font-size:8pt; color:#94a3b8; }}
-  canvas {{ margin-top:8px; }}
 </style></head><body>
   <div class="cover">
     <p class="k">Monthly Performance Report · Auto-generated</p>
     <h1>{company}</h1>
-    <p>Generated automatically from an uploaded spreadsheet — narrative, charts and layout.</p>
+    <p>Generated automatically from an uploaded spreadsheet — narrative, chart and layout.</p>
   </div>
 
   <h2>Executive summary</h2>
@@ -126,28 +157,15 @@ def build_html(m: dict, summary: str, company: str) -> str:
     <div class="kpi"><div class="n">{money(m['total_revenue'])}</div><div class="l">Total revenue</div></div>
     <div class="kpi"><div class="n">{money(m['total_profit'])}</div><div class="l">Net profit</div></div>
     <div class="kpi"><div class="n">{m['margin_pct']}%</div><div class="l">Margin</div></div>
-    <div class="kpi"><div class="n">{'+' if m['growth_pct']>=0 else ''}{m['growth_pct']}%</div><div class="l">Revenue growth</div></div>
+    <div class="kpi"><div class="n">{growth}</div><div class="l">Revenue growth</div></div>
   </div>
 
   <h2>Revenue vs costs</h2>
-  <canvas id="chart" height="120"></canvas>
+  <img class="chart" src="{chart}" alt="Revenue vs costs chart">
 
   <h2>Detail</h2>
   <table><thead><tr><th>{m['label_col']}</th><th>Revenue</th><th>Costs</th><th>Profit</th></tr></thead>
   <tbody>{rows}</tbody></table>
 
   <div class="foot">Demonstration build — not a paid client engagement. All figures are synthetic and fictional; no real or private data is used.</div>
-
-  <script>
-    new Chart(document.getElementById('chart'), {{
-      type:'bar',
-      data:{{ labels:{json.dumps(m['labels'])},
-        datasets:[
-          {{label:'Revenue', data:{json.dumps(m['revenue'])}, backgroundColor:'#6d28d9', borderRadius:3}},
-          {{label:'Costs',   data:{json.dumps(m['costs'])},   backgroundColor:'#c4b5fd', borderRadius:3}}
-        ]}},
-      options:{{ animation:false, plugins:{{legend:{{position:'bottom'}}}},
-        scales:{{ y:{{ beginAtZero:true }} }} }}
-    }});
-  </script>
 </body></html>"""

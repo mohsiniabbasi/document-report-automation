@@ -3,5 +3,7 @@ uvicorn[standard]>=0.29
 python-multipart>=0.0.9
 pandas>=2.0
 openpyxl>=3.1
+matplotlib>=3.8
+weasyprint>=61.0
 # Optional — enable a Claude-written executive summary (set ANTHROPIC_API_KEY):
 # anthropic>=0.40
