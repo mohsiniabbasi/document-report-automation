@@ -30,14 +30,21 @@ def html_to_pdf(html: str, out_path: str | Path) -> Path:
     tmp = Path(tempfile.gettempdir()) / f"report-{uuid.uuid4().hex}.html"
     tmp.write_text(html, encoding="utf-8")
     try:
-        subprocess.run(
+        proc = subprocess.run(
             [_find_chrome(), "--headless", "--disable-gpu", "--no-pdf-header-footer",
              # --no-sandbox / --disable-dev-shm-usage: required to run Chromium headless
              # as root inside a container; harmless on a normal desktop.
              "--no-sandbox", "--disable-dev-shm-usage",
              "--virtual-time-budget=6000", f"--print-to-pdf={out_path}", tmp.as_uri()],
-            check=True, capture_output=True, timeout=60,
+            capture_output=True, timeout=60,
         )
     finally:
         tmp.unlink(missing_ok=True)
+    # Trust the output file, not the exit code: some headless Chromium builds write a
+    # valid PDF then exit non-zero on shutdown (harmless crashpad noise in containers).
+    if not out_path.exists() or out_path.stat().st_size < 200 or out_path.read_bytes()[:4] != b"%PDF":
+        raise RuntimeError(
+            f"PDF render failed (exit {proc.returncode}): "
+            f"{proc.stderr.decode(errors='ignore')[-500:]}"
+        )
     return out_path
